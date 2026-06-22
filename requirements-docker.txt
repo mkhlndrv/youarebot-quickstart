@@ -1,0 +1,10 @@
+# Lean runtime deps for the Session 9 docker image (bot backend + streamlit UI).
+# The zero-shot classifier's torch/transformers are intentionally NOT here: the
+# LLM bot does not need them, and /predict degrades to a neutral 0.5 without them.
+fastapi[standard]>=0.115.0,<0.116.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.10.0,<3.0.0
+openai>=1.0.0
+httpx>=0.27.0
+streamlit==1.43.1
+requests>=2.32.0,<3.0.0

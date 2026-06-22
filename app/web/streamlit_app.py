@@ -1,3 +1,4 @@
+import os
 from uuid import uuid4
 
 import requests
@@ -5,11 +6,12 @@ import streamlit as st
 
 from app.models import GetMessageRequestModel, IncomingMessage
 
-default_echo_bot_url = "http://localhost:6872"
+# In docker-compose the backend is reachable as http://fastapi:6872; locally 6872.
+default_echo_bot_url = os.getenv("ECHO_BOT_URL", "http://localhost:6872")
 st.set_page_config(initial_sidebar_state="expanded")
 
-st.markdown("# Echo bot 🚀")
-st.sidebar.markdown("# Echo bot 🚀")
+st.markdown("# LLM bot 🤖")
+st.sidebar.markdown("# LLM bot 🤖")
 
 if "dialog_id" not in st.session_state:
     st.session_state.dialog_id = str(uuid4())
@@ -96,19 +98,23 @@ if message := st.chat_input():
     )
     record_metric("user", user_prob)
 
-    # 2. get the bot's reply (the echo bot returns the same text)
-    reply = requests.post(
-        st.session_state.echo_bot_url + "/get_message",
-        json=GetMessageRequestModel(
-            dialog_id=st.session_state.dialog_id,
-            last_msg_text=message,
-            last_message_id=uuid4(),
-        ).model_dump(),
-    ).json()["new_msg_text"]
+    # 2. get the bot's reply (the LLM generates a real, human-like answer)
+    try:
+        reply = requests.post(
+            st.session_state.echo_bot_url + "/get_message",
+            json=GetMessageRequestModel(
+                dialog_id=st.session_state.dialog_id,
+                last_msg_text=message,
+                last_message_id=uuid4(),
+            ).model_dump(),
+            timeout=120,
+        ).json()["new_msg_text"]
+    except Exception as exc:
+        st.error(f"/get_message failed: {exc}")
+        reply = "(no reply)"
 
-    # 3. the reply equals the user's message, so it has the same probability -
-    #    reuse it instead of calling /predict again, and count it as a bot sample.
-    bot_prob = user_prob
+    # 3. the reply is now an LLM answer (not an echo), so score it on its own.
+    bot_prob = classify(reply, participant_index=1)
     st.session_state["messages"].append(
         {"role": "assistant", "content": reply, "prob": bot_prob}
     )

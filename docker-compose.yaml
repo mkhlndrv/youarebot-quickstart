@@ -1,0 +1,67 @@
+name: youarebot-session9
+
+services:
+  # 1. LLM — OpenAI-compatible llama.cpp server. Downloads the GGUF from
+  #    Hugging Face on first start and caches it in the llm-models volume.
+  llm:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: youarebot-llm
+    environment:
+      LLAMA_CACHE: /models
+    command:
+      - "-hf"
+      - "Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M"
+      - "--alias"
+      - "qwen2.5-0.5b-instruct"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+      - "--ctx-size"
+      - "4096"
+    volumes:
+      - llm-models:/models
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 240s
+    restart: unless-stopped
+
+  # 2. FastAPI — the bot backend. /get_message forwards the user prompt to the
+  #    llm service and returns the model's reply.
+  fastapi:
+    build: .
+    container_name: youarebot-fastapi
+    command: uvicorn app.api.main:app --host 0.0.0.0 --port 6872
+    environment:
+      LLM_BASE_URL: http://llm:8080/v1
+      LLM_MODEL: qwen2.5-0.5b-instruct
+      LLM_API_KEY: not-needed
+    ports:
+      - "6872:6872"
+    depends_on:
+      llm:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # 3. Streamlit — the chat UI. Talks to the fastapi service over the compose
+  #    network.
+  streamlit:
+    build: .
+    container_name: youarebot-streamlit
+    command: streamlit run app/web/streamlit_app.py --server.port=8501 --server.address=0.0.0.0
+    environment:
+      ECHO_BOT_URL: http://fastapi:6872
+      PYTHONPATH: /app
+    ports:
+      - "8501:8501"
+    depends_on:
+      - fastapi
+    restart: unless-stopped
+
+volumes:
+  llm-models:

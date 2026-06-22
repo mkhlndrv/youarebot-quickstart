@@ -1,0 +1,8 @@
+.git
+.venv
+__pycache__
+*.pyc
+poetry.lock
+portforward_key
+*.md
+.env
