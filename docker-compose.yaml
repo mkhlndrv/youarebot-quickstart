@@ -1,0 +1,104 @@
+name: youarebot-session12
+
+# Four services, each with a single responsibility. Inside this network the
+# services reach each other by service name (mlflow, classifier, llm,
+# orchestrator) — never localhost. Only the public gateway (orchestrator) and
+# the MLflow UI are published to the host.
+services:
+  # 1. MLflow — experiment tracking + model registry.
+  mlflow:
+    build: ./services/mlflow
+    container_name: youarebot-mlflow
+    volumes:
+      - mlflow-data:/mlflow
+    ports:
+      # Host 5001 -> container 5000 (host 5000 is taken by AirPlay on macOS).
+      # Internal services still reach it as http://mlflow:5000.
+      - "5001:5000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  # 2. Classifier — registers the zero-shot champion in MLflow on first boot,
+  #    then loads it from the registry and serves POST /predict.
+  classifier:
+    build: ./services/classifier
+    container_name: youarebot-classifier
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_NAME: MoritzLaurer/mDeBERTa-v3-base-mnli-xnli
+      REGISTERED_MODEL_NAME: youarebot-classifier
+      HF_HOME: /hf-cache
+    volumes:
+      - hf-cache:/hf-cache
+    expose:
+      - "8000"
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      # First boot downloads the model and loads it; give it room.
+      start_period: 360s
+    restart: unless-stopped
+
+  # 3. LLM — OpenAI-compatible llama.cpp server on port 11434.
+  llm:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: youarebot-llm
+    environment:
+      LLAMA_CACHE: /models
+    command:
+      - "-hf"
+      - "Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M"
+      - "--alias"
+      - "qwen2.5-0.5b-instruct"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "11434"
+      - "--ctx-size"
+      - "4096"
+    volumes:
+      - llm-models:/models
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:11434/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 240s
+    restart: unless-stopped
+
+  # 4. Orchestrator — public API gateway. Routes /predict -> classifier and
+  #    /get_message -> llm. Runs no model itself.
+  orchestrator:
+    build: ./services/orchestrator
+    container_name: youarebot-orchestrator
+    environment:
+      CLASSIFIER_URL: http://classifier:8000
+      LLM_URL: http://llm:11434
+      LLM_MODEL: qwen2.5-0.5b-instruct
+      CLASSIFIER_TIMEOUT: "30"
+      LLM_TIMEOUT: "120"
+    ports:
+      - "8000:8000"
+    depends_on:
+      classifier:
+        condition: service_healthy
+      llm:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mlflow-data:
+  hf-cache:
+  llm-models:

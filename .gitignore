@@ -172,3 +172,15 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Local model / MLflow data (lives in Docker volumes, never commit it)
+mlruns/
+mlflow.db
+artifacts/
+hf-cache/
+*.gguf
+
+# Secrets — never commit keys or tokens
+portforward_key
+*.pem
+*.key
